@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -30,23 +31,45 @@ var cubiToken eaas.Token = eaas.Token{
 	0xde, 0xad, 0xc0, 0xde, 0xc0, 0xff, 0xee, 0x00,
 }
 
+var (
+	flagMusicDir    string
+	flagNavidromeDB string
+	flagHostIP      string
+)
+
 var hostname string
 
 func init() {
 	var err error
 	hostname, err = os.Hostname()
 	if err != nil {
-		hostname = "cubi"
+		hostname = "music-server"
 	}
 }
 
 func main() {
+	flag.StringVar(&flagMusicDir, "music-dir", "/srv/music", "Path to music library root")
+	flag.StringVar(&flagNavidromeDB, "navidrome-db", "", "Path to Navidrome database (optional)")
+	flag.StringVar(&flagHostIP, "host-ip", "", "Host IP address for artwork URLs (autodetected if not set)")
+	flag.Parse()
+
+	// Set globals used by other files
+	if flagMusicDir != "" {
+		overrideMusicRoot = flagMusicDir
+	}
+	if flagNavidromeDB != "" {
+		overrideNavidromeDB = flagNavidromeDB
+	}
+	if flagHostIP != "" {
+		overrideHostIP = flagHostIP
+	}
+
 	var token [16]byte
 	if _, err := rand.Read(token[:]); err != nil {
 		panic(err)
 	}
 
-	if err := loadLibrary(musicRoot); err != nil {
+	if err := loadLibrary(getMusicRoot()); err != nil {
 		log.Fatalf("Failed to load library: %v", err)
 	}
 
@@ -71,12 +94,12 @@ func main() {
 			select {
 			case <-ticker.C:
 				log.Println("Periodic rescan starting...")
-				if err := loadLibrary(musicRoot); err != nil {
+				if err := loadLibrary(getMusicRoot()); err != nil {
 					log.Printf("Rescan failed: %v", err)
 				}
 			case <-hupCh:
 				log.Println("SIGHUP received, rescanning...")
-				if err := loadLibrary(musicRoot); err != nil {
+				if err := loadLibrary(getMusicRoot()); err != nil {
 					log.Printf("Rescan failed: %v", err)
 				}
 			case <-ctx.Done():

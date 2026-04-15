@@ -1,0 +1,17 @@
+[Unit]
+Description=DenonDJ EAAS Music Server
+After=network.target
+
+[Service]
+Type=simple
+User=andy
+WorkingDirectory=/home/andy/go-stagelinq
+ExecStart=/home/andy/go-stagelinq/storage \
+  --music-dir /srv/music \
+  --navidrome-db /srv/navidrome/data/navidrome.db \
+  --host-ip 192.168.0.100
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -147,11 +147,29 @@ func (e *EngineLibraryServiceServer) SearchTracks(ctx context.Context, req *engi
 	libraryMu.RLock()
 	defer libraryMu.RUnlock()
 	resp := &enginelibrary.SearchTracksResponse{Tracks: []*enginelibrary.ListTrack{}}
+
+	query := ""
+	if req.Query != nil {
+		query = strings.TrimSpace(*req.Query)
+	}
+
+	// Require at least 2 characters to search
+	if len(query) < 2 {
+		return resp, nil
+	}
+
+	// Respect page_size, default to 50 max
+	limit := int(req.GetPageSize())
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+
 	for _, t := range allTracks {
-		if req.Query != nil && *req.Query != "" {
-			if !trackMatchesQuery(t, *req.Query) {
-				continue
-			}
+		if len(resp.Tracks) >= limit {
+			break
+		}
+		if !trackMatchesQuery(t, query) {
+			continue
 		}
 		lt := &enginelibrary.ListTrack{
 			Metadata: trackToMetadata(t),
@@ -161,6 +179,7 @@ func (e *EngineLibraryServiceServer) SearchTracks(ctx context.Context, req *engi
 		}
 		resp.Tracks = append(resp.Tracks, lt)
 	}
+
+	log.Printf("SearchTracks: returning %d results for query '%s'", len(resp.Tracks), query)
 	return resp, nil
 }
-
