@@ -2,11 +2,12 @@ package main
 
 import (
 	"bytes"
-	"io"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -36,17 +37,44 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if requestedPath != demoTrackURLGRPC {
-		log.Println("HTTP: Download, not found:", requestedPath)
+
+	linuxPath := requestedPath
+	linuxPath = strings.Trim(linuxPath, "<>")
+	linuxPath = strings.TrimPrefix(linuxPath, "C:")
+	linuxPath = strings.ReplaceAll(linuxPath, "\\", "/")
+
+	log.Println("HTTP: Download, serving:", linuxPath)
+	http.ServeFile(w, r, linuxPath)
+}
+
+func handleArtwork(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	idStr := vars["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	libraryMu.RLock()
+	t, ok := trackMap[id]
+	libraryMu.RUnlock()
+
+	if !ok || len(t.Artwork) == 0 {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	log.Println("HTTP: Download, OK:", requestedPath)
-	w.Header().Set("Content-type", "application/octet-stream")
-	w.Header().Set("Content-length", strconv.Itoa(len(demoTrackBytes)))
+
+	// Detect image type
+	contentType := "image/jpeg"
+	if len(t.Artwork) > 4 && string(t.Artwork[:4]) == "\x89PNG" {
+		contentType = "image/png"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(t.Artwork)))
 	w.WriteHeader(http.StatusOK)
-	f := bytes.NewReader(demoTrackBytes)
-	io.Copy(w, f)
+	bytes.NewReader(t.Artwork).WriteTo(w)
 }
 
 func eaasHTTPHandler() http.Handler {
@@ -56,6 +84,7 @@ func eaasHTTPHandler() http.Handler {
 	r.UseEncodedPath()
 	r.SkipClean(true)
 	r.HandleFunc("/download/{path}", handleDownload).Methods(http.MethodGet)
+	r.HandleFunc("/artwork/{id}", handleArtwork).Methods(http.MethodGet)
 	r.HandleFunc("/ping", handlePing).Methods(http.MethodGet)
 	return r
 }

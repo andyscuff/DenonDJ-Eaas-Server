@@ -1,59 +1,57 @@
-# StagelinQ for Golang
+# DenonDJ EAAS Server
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/icedream/go-stagelinq.svg)](https://pkg.go.dev/github.com/icedream/go-stagelinq)
-
-This library implements Denon's StagelinQ protocol, allowing any Go application to talk to devices that are compatible with this protocol on the network.
-
-An example application is provided that, if running successfully, will output information like this:
-
-![Screenshot of the example CLI](docs/screenshot.png)
+A self-hosted music library server for Denon DJ Engine OS devices via the EAAS/StageLinQ protocol. Streams your music library wirelessly to Engine OS hardware (Prime 4+, SC6000 etc) without needing Engine DJ desktop software running.
 
 ## Features
 
-- Automatically discover StagelinQ-compatible devices on the network
-- Access state map information such as currently playing track metadata, fader values, etc.
-- Access live beat stream information such as current beat, total beats, bpm, and timeline position.
+- Serves FLAC, MP3, WAV, AIFF and M4A files
+- Genre → Artist → Album playlist hierarchy derived from folder structure
+- Album artwork served from embedded tags
+- Full text search across title, artist, album, genre and filename
+- Navidrome playlist integration — playlists created in Navidrome appear on your DJ hardware
+- Hourly auto-rescan + instant rescan via SIGHUP
+- Runs as a systemd service on Linux
 
-## Stability
+## Requirements
 
-The code of this project is an **experimental** reverse-engineering effort and therefore can behave erratically in untested cases. Currently, this code only has been practically tested with the Denon Prime 4.
+- Linux (tested on Ubuntu 24.04)
+- Go 1.19+
+- Music library organised as `Genre/Artist/Album/Track.ext`
 
-If you have any other Denon devices you would like to test this library against, please do! Even better, you can let me know if you run into any bugs by reporting them [as an issue ticket](https://github.com/icedream/go-stagelinq/issues).
+## Installation
 
-## Demo programs
+```bash
+git clone https://github.com/andyscuff/DenonDJ-Eaas-Server.git
+cd DenonDJ-Eaas-Server
+go build ./cmd/storage
+```
 
-This repository gives you example programs to play around with to test this
-library's functionality:
+## Configuration
 
-- `stagelinq-discover`: Simple code to discover devices and dump their states.
-- `beatinfo`: Like `stagelinq-discover` except it will dump the beat info stream instead.
-- `storage`: A demo for serving a remote library via the EAAS protocol.
+Edit `cmd/storage/library.go` and set `musicRoot` to your music folder path.
 
-## Building
+If using Navidrome playlist integration, edit `cmd/storage/navidrome.go` and set `navidromeDB` to your Navidrome database path.
 
-Please make sure you have Go 1.19 or newer.
+## Running
 
-You may install the binaries in this repository one of two means:
+```bash
+./storage
+```
 
-- `git clone` this repository and run `go build -v ./cmd/<binary>` to build the binary.
-- Run `go install github.com/icedream/go-stagelinq/cmd/<binary>` to install the binary to your `$GOPATH`.
+Or as a systemd service — see `systemd/cubi-music.service` for an example unit file.
 
-## Usage
+## Rescanning
 
-To use this library, import `"github.com/icedream/go-stagelinq"` in your Go project. This will give you access to the `stagelinq` library namespace.
+To trigger an immediate rescan after adding new music:
 
-EAAS functionality is served in a subpackage via `"github.com/icedream/go-stagelinq/eaas"`.
+```bash
+sudo systemctl kill -s HUP cubi-music
+```
 
-Make sure to run `go mod tidy` for Go to pick up the library properly and update `go.mod` and `go.sum` in your project.
+## Credits
 
-[Go code documentation is available](https://pkg.go.dev/github.com/icedream/go-stagelinq).
-
-## Testing
-
-This project uses Go tests, they can be run with this command:
-
-    go test ./...
+Built on top of [go-stagelinq](https://github.com/icedream/go-stagelinq) by Carl Kittelberger (icedream), which implements the Denon StageLinQ/EAAS protocol.
 
 ## License
 
-This code is licensed under the MIT license. For more information, please read [LICENSE](LICENSE).
+MIT
