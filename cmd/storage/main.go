@@ -109,7 +109,9 @@ func main() {
 	}()
 
 	var s http.Server
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.MaxSendMsgSize(32 * 1024 * 1024),
+	)
 
 	go func() {
 		<-ctx.Done()

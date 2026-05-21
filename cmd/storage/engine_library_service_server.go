@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/icedream/go-stagelinq/eaas/proto/enginelibrary"
+	"golang.org/x/text/unicode/norm"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -107,12 +108,21 @@ func (e *EngineLibraryServiceServer) GetTracks(ctx context.Context, req *enginel
 
 	playlistID := req.GetPlaylistId()
 	if playlistID != "" {
+		log.Printf("GetTracks: incoming playlist_id raw bytes: %x (string: %q)", []byte(playlistID), playlistID)
+		normalizedID := norm.NFC.String(playlistID)
+		log.Printf("GetTracks: NFC-normalized bytes: %x (string: %q)", []byte(normalizedID), normalizedID)
+		playlistID = normalizedID
 		if p, ok := playlistMap[playlistID]; ok {
+			limit := int(req.GetPageSize())
+			if limit <= 0 {
+				limit = 25
+			}
 			for _, tid := range p.TrackIDs {
+				if len(resp.Tracks) >= limit {
+					break
+				}
 				if t, ok := trackMap[tid]; ok {
-					lt := &enginelibrary.ListTrack{
-						Metadata: trackToMetadata(t),
-					}
+					lt := &enginelibrary.ListTrack{Metadata: trackToMetadata(t)}
 					if len(t.Artwork) > 0 {
 						lt.PreviewArtwork = t.Artwork
 					}
@@ -120,6 +130,16 @@ func (e *EngineLibraryServiceServer) GetTracks(ctx context.Context, req *enginel
 				}
 			}
 			return resp, nil
+		}
+		log.Printf("GetTracks: playlist_id %q not found in map (%d entries)", playlistID, len(playlistMap))
+		n := 0
+		for k := range playlistMap {
+			log.Printf("  map key[%d]: %x (string: %q)", n, []byte(k), k)
+			n++
+			if n >= 20 {
+				log.Printf("  ... (%d more keys omitted)", len(playlistMap)-20)
+				break
+			}
 		}
 		return resp, nil
 	}
@@ -171,9 +191,7 @@ func (e *EngineLibraryServiceServer) SearchTracks(ctx context.Context, req *engi
 		if !trackMatchesQuery(t, query) {
 			continue
 		}
-		lt := &enginelibrary.ListTrack{
-			Metadata: trackToMetadata(t),
-		}
+		lt := &enginelibrary.ListTrack{Metadata: trackToMetadata(t)}
 		if len(t.Artwork) > 0 {
 			lt.PreviewArtwork = t.Artwork
 		}

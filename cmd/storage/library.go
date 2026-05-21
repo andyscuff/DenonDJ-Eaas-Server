@@ -10,6 +10,7 @@ import (
 
 	"github.com/dhowden/tag"
 	"github.com/icedream/go-stagelinq/eaas/proto/enginelibrary"
+	"golang.org/x/text/unicode/norm"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -98,10 +99,11 @@ func loadLibrary(path string) error {
 		genreCount++
 		log.Printf("Scanning genre %d/%d: %s", genreCount, totalGenres, genreDir.Name())
 
+		genreName := norm.NFC.String(genreDir.Name())
 		genrePath := filepath.Join(path, genreDir.Name())
 		genreNode := &PlaylistNode{
-			ID:    "genre-" + genreDir.Name(),
-			Title: genreDir.Name(),
+			ID:    "genre-" + genreName,
+			Title: genreName,
 		}
 
 		artistDirs, err := os.ReadDir(genrePath)
@@ -113,10 +115,11 @@ func loadLibrary(path string) error {
 			if !artistDir.IsDir() {
 				continue
 			}
+			artistName := norm.NFC.String(artistDir.Name())
 			artistPath := filepath.Join(genrePath, artistDir.Name())
 			artistNode := &PlaylistNode{
-				ID:    "artist-" + genreDir.Name() + "-" + artistDir.Name(),
-				Title: artistDir.Name(),
+				ID:    "artist-" + genreName + "-" + artistName,
+				Title: artistName,
 			}
 
 			albumDirs, err := os.ReadDir(artistPath)
@@ -134,8 +137,8 @@ func loadLibrary(path string) error {
 
 			if hasDirectTracks {
 				albumNode := &PlaylistNode{
-					ID:    "album-" + genreDir.Name() + "-" + artistDir.Name() + "-" + artistDir.Name(),
-					Title: artistDir.Name(),
+					ID:    "album-" + genreName + "-" + artistName + "-" + artistName,
+					Title: artistName,
 				}
 				for _, trackFile := range albumDirs {
 					if trackFile.IsDir() || !isAudioFile(trackFile.Name()) {
@@ -147,9 +150,9 @@ func loadLibrary(path string) error {
 						Path:     trackPath,
 						Filename: trackFile.Name(),
 						Title:    strings.TrimSuffix(trackFile.Name(), filepath.Ext(trackFile.Name())),
-						Artist:   artistDir.Name(),
-						Album:    artistDir.Name(),
-						Genre:    genreDir.Name(),
+						Artist:   artistName,
+						Album:    artistName,
+						Genre:    genreName,
 					}
 					readTrackTags(trackPath, t)
 					newAllTracks = append(newAllTracks, t)
@@ -160,6 +163,7 @@ func loadLibrary(path string) error {
 				if len(albumNode.TrackIDs) > 0 {
 					artistNode.Children = append(artistNode.Children, albumNode)
 					newPlaylistMap[albumNode.ID] = albumNode
+					log.Printf("scan: inserted direct-album key bytes: %x (string: %q)", []byte(albumNode.ID), albumNode.ID)
 				}
 			}
 
@@ -167,10 +171,11 @@ func loadLibrary(path string) error {
 				if !albumDir.IsDir() {
 					continue
 				}
+				albumName := norm.NFC.String(albumDir.Name())
 				albumPath := filepath.Join(artistPath, albumDir.Name())
 				albumNode := &PlaylistNode{
-					ID:    "album-" + genreDir.Name() + "-" + artistDir.Name() + "-" + albumDir.Name(),
-					Title: albumDir.Name(),
+					ID:    "album-" + genreName + "-" + artistName + "-" + albumName,
+					Title: albumName,
 				}
 				trackFiles, err := os.ReadDir(albumPath)
 				if err != nil {
@@ -186,9 +191,9 @@ func loadLibrary(path string) error {
 						Path:     trackPath,
 						Filename: trackFile.Name(),
 						Title:    strings.TrimSuffix(trackFile.Name(), filepath.Ext(trackFile.Name())),
-						Artist:   artistDir.Name(),
-						Album:    albumDir.Name(),
-						Genre:    genreDir.Name(),
+						Artist:   artistName,
+						Album:    albumName,
+						Genre:    genreName,
 					}
 					readTrackTags(trackPath, t)
 					newAllTracks = append(newAllTracks, t)
@@ -199,18 +204,21 @@ func loadLibrary(path string) error {
 				if len(albumNode.TrackIDs) > 0 {
 					artistNode.Children = append(artistNode.Children, albumNode)
 					newPlaylistMap[albumNode.ID] = albumNode
+					log.Printf("scan: inserted album key bytes: %x (string: %q)", []byte(albumNode.ID), albumNode.ID)
 				}
 			}
 
 			if len(artistNode.Children) > 0 {
 				genreNode.Children = append(genreNode.Children, artistNode)
 				newPlaylistMap[artistNode.ID] = artistNode
+				log.Printf("scan: inserted artist key bytes: %x (string: %q)", []byte(artistNode.ID), artistNode.ID)
 			}
 		}
 
 		if len(genreNode.Children) > 0 {
 			newAllPlaylists = append(newAllPlaylists, genreNode)
 			newPlaylistMap[genreNode.ID] = genreNode
+			log.Printf("scan: inserted genre key bytes: %x (string: %q)", []byte(genreNode.ID), genreNode.ID)
 		}
 	}
 
