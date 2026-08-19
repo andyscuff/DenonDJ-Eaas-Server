@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"flag"
 	"fmt"
 	"log"
@@ -62,11 +61,6 @@ func main() {
 	}
 	if flagHostIP != "" {
 		overrideHostIP = flagHostIP
-	}
-
-	var token [16]byte
-	if _, err := rand.Read(token[:]); err != nil {
-		panic(err)
 	}
 
 	if err := loadLibrary(getMusicRoot()); err != nil {

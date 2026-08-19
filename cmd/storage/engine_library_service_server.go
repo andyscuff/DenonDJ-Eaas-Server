@@ -77,6 +77,7 @@ func (e *EngineLibraryServiceServer) GetTrack(ctx context.Context, req *engineli
 		if id == req.GetTrackId() {
 			url := trackURL(t)
 			size := trackFileSize(t)
+			metadata := trackToMetadata(t)
 			return &enginelibrary.GetTrackResponse{
 				Blob: &enginelibrary.TrackBlob{
 					Type: &enginelibrary.TrackBlob_Url{
@@ -86,9 +87,9 @@ func (e *EngineLibraryServiceServer) GetTrack(ctx context.Context, req *engineli
 						},
 					},
 				},
-				Metadata: trackToMetadata(t),
+				Metadata: metadata,
 				PerformanceData: &enginelibrary.TrackPerformanceData{
-					Bpm: trackToMetadata(t).Bpm,
+					Bpm: metadata.Bpm,
 					MainCue: &enginelibrary.MainCue{
 						Position:        &unsetFloat64,
 						InitialPosition: &unsetFloat64,

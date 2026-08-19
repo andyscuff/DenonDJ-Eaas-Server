@@ -5,14 +5,19 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dhowden/tag"
 	"github.com/icedream/go-stagelinq/eaas/proto/enginelibrary"
 	"golang.org/x/text/unicode/norm"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+const recentlyAddedLimit = 50
 
 var unsetFloat64 float64 = -1
 
@@ -32,6 +37,7 @@ type Track struct {
 	Composer string
 	Remixer  string
 	Artwork  []byte
+	AddedAt  time.Time
 }
 
 type PlaylistNode struct {
@@ -54,7 +60,34 @@ func isAudioFile(name string) bool {
 	return ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".wav" || ext == ".m4a"
 }
 
+// rawTagKeys maps our fields to the various raw tag keys different container
+// formats use for them (ID3v2.2/2.3/2.4 frame IDs, lowercase Vorbis comment
+// field names). dhowden/tag doesn't expose these via its Metadata interface.
+var (
+	bpmTagKeys     = []string{"TBP", "TBPM", "bpm"}
+	labelTagKeys   = []string{"TPB", "TPUB", "label", "organization", "publisher"}
+	remixerTagKeys = []string{"TP4", "TPE4", "remixer", "modifiedby"}
+)
+
+func rawTagString(raw map[string]interface{}, keys []string) string {
+	for _, k := range keys {
+		v, ok := raw[k]
+		if !ok {
+			continue
+		}
+		if s, ok := v.(string); ok && s != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
 func readTrackTags(trackPath string, t *Track) {
+	if info, err := os.Stat(trackPath); err == nil {
+		t.AddedAt = info.ModTime()
+	}
+	t.Length = trackDuration(trackPath)
+
 	f, err := os.Open(trackPath)
 	if err != nil {
 		return
@@ -64,12 +97,47 @@ func readTrackTags(trackPath string, t *Track) {
 	if err != nil {
 		return
 	}
-	if m.Title() != "" { t.Title = m.Title() }
-	if m.Artist() != "" { t.Artist = m.Artist() }
-	if m.Album() != "" { t.Album = m.Album() }
-	if m.Genre() != "" { t.Genre = m.Genre() }
-	if m.Year() != 0 { t.Year = m.Year() }
-	if m.Picture() != nil { t.Artwork = m.Picture().Data }
+	if m.Title() != "" {
+		t.Title = m.Title()
+	}
+	if m.Artist() != "" {
+		t.Artist = m.Artist()
+	}
+	if m.Album() != "" {
+		t.Album = m.Album()
+	}
+	if m.Genre() != "" {
+		t.Genre = m.Genre()
+	}
+	if m.Year() != 0 {
+		t.Year = m.Year()
+	}
+	if m.Comment() != "" {
+		t.Comment = m.Comment()
+	}
+	if m.Composer() != "" {
+		t.Composer = m.Composer()
+	}
+	if m.Picture() != nil {
+		t.Artwork = m.Picture().Data
+	}
+
+	raw := m.Raw()
+	if bpmStr := rawTagString(raw, bpmTagKeys); bpmStr != "" {
+		if bpm, err := strconv.ParseFloat(strings.TrimRight(bpmStr, "\x00"), 64); err == nil {
+			t.BPM = bpm
+		}
+	} else if tmpo, ok := raw["tmpo"]; ok {
+		if v, ok := tmpo.(int); ok {
+			t.BPM = float64(v)
+		}
+	}
+	if label := rawTagString(raw, labelTagKeys); label != "" {
+		t.Label = strings.TrimRight(label, "\x00")
+	}
+	if remixer := rawTagString(raw, remixerTagKeys); remixer != "" {
+		t.Remixer = strings.TrimRight(remixer, "\x00")
+	}
 }
 
 func loadLibrary(path string) error {
@@ -222,6 +290,11 @@ func loadLibrary(path string) error {
 		}
 	}
 
+	if recent := buildRecentlyAddedPlaylist(newAllTracks); recent != nil {
+		newAllPlaylists = append([]*PlaylistNode{recent}, newAllPlaylists...)
+		newPlaylistMap[recent.ID] = recent
+	}
+
 	libraryMu.Lock()
 	allTracks = newAllTracks
 	allPlaylists = newAllPlaylists
@@ -254,23 +327,72 @@ func loadLibrary(path string) error {
 	return nil
 }
 
+func buildRecentlyAddedPlaylist(tracks []*Track) *PlaylistNode {
+	if len(tracks) == 0 {
+		return nil
+	}
+	sorted := make([]*Track, len(tracks))
+	copy(sorted, tracks)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].AddedAt.After(sorted[j].AddedAt)
+	})
+
+	limit := recentlyAddedLimit
+	if limit > len(sorted) {
+		limit = len(sorted)
+	}
+	node := &PlaylistNode{ID: "recently-added", Title: "Recently Added"}
+	for _, t := range sorted[:limit] {
+		node.TrackIDs = append(node.TrackIDs, t.ID)
+	}
+	return node
+}
+
 func trackToMetadata(t *Track) *enginelibrary.TrackMetadata {
 	id := fmt.Sprintf("%d", t.ID)
+	dateAdded := t.AddedAt
+	if dateAdded.IsZero() {
+		dateAdded = time.Now()
+	}
 	m := &enginelibrary.TrackMetadata{
 		Id:        &id,
-		DateAdded: timestamppb.Now(),
+		DateAdded: timestamppb.New(dateAdded),
 	}
-	if t.Title != "" { m.Title = &t.Title }
-	if t.Artist != "" { m.Artist = &t.Artist }
-	if t.Album != "" { m.Album = &t.Album }
-	if t.Genre != "" { m.Genre = &t.Genre }
-	if t.BPM > 0 { m.Bpm = &t.BPM }
-	if t.Year > 0 { y := uint32(t.Year); m.Year = &y }
-	if t.Label != "" { m.Label = &t.Label }
-	if t.Comment != "" { m.Comment = &t.Comment }
-	if t.Composer != "" { m.Composer = &t.Composer }
-	if t.Remixer != "" { m.Remixer = &t.Remixer }
-	if t.Length > 0 { l := uint32(t.Length); m.LengthSeconds = &l }
+	if t.Title != "" {
+		m.Title = &t.Title
+	}
+	if t.Artist != "" {
+		m.Artist = &t.Artist
+	}
+	if t.Album != "" {
+		m.Album = &t.Album
+	}
+	if t.Genre != "" {
+		m.Genre = &t.Genre
+	}
+	if t.BPM > 0 {
+		m.Bpm = &t.BPM
+	}
+	if t.Year > 0 {
+		y := uint32(t.Year)
+		m.Year = &y
+	}
+	if t.Label != "" {
+		m.Label = &t.Label
+	}
+	if t.Comment != "" {
+		m.Comment = &t.Comment
+	}
+	if t.Composer != "" {
+		m.Composer = &t.Composer
+	}
+	if t.Remixer != "" {
+		m.Remixer = &t.Remixer
+	}
+	if t.Length > 0 {
+		l := uint32(t.Length)
+		m.LengthSeconds = &l
+	}
 	return m
 }
 
