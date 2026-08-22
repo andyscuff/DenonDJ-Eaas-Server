@@ -71,6 +71,21 @@ To trigger an immediate rescan after adding new music:
 sudo systemctl kill -s HUP cubi-music
 ```
 
+## Docker
+
+Images are published to GHCR on every push to `main`: `ghcr.io/andyscuff/denondj-eaas-server:latest`.
+
+`network_mode: host` is required, not optional — EAAS device discovery is a UDP broadcast
+on port 11224, which a container on the default bridge network never receives regardless of
+published ports. See [`docker-compose.example.yml`](docker-compose.example.yml) for a full
+example (including alongside Navidrome), or run it directly:
+
+```bash
+docker run -d --name cubi-music --restart unless-stopped --network host \
+  -v /path/to/your/music:/music:ro \
+  ghcr.io/andyscuff/denondj-eaas-server:latest --music-dir /music
+```
+
 ## Navidrome Integration
 
 If you run [Navidrome](https://navidrome.org) as your music server, this tool will automatically read your Navidrome playlists and present them on your Denon hardware under a "My Playlists" section.

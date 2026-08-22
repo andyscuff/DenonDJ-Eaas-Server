@@ -1,0 +1,23 @@
+# Example compose service — copy the relevant bits into your own compose
+# file (e.g. alongside Navidrome).
+#
+# network_mode: host is not optional: EAAS device discovery is a UDP
+# broadcast on port 11224, which never reaches a container on the default
+# bridge network no matter what you put in `ports:`. Engine OS hardware
+# simply won't see the server without it.
+services:
+  cubi-music:
+    image: ghcr.io/andyscuff/denondj-eaas-server:latest
+    container_name: cubi-music
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /path/to/your/music:/music:ro
+      # Optional — only needed for the Navidrome playlist integration.
+      - /path/to/navidrome/data/navidrome.db:/navidrome/navidrome.db:ro
+    command:
+      - --music-dir=/music
+      - --navidrome-db=/navidrome/navidrome.db
+      # network_mode: host means auto-detection usually picks the right LAN
+      # IP already; only set this if artwork/streaming URLs come back wrong.
+      # - --host-ip=192.168.1.100
