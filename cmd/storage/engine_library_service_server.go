@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/icedream/go-stagelinq/eaas/proto/enginelibrary"
@@ -62,9 +63,58 @@ func (e *EngineLibraryServiceServer) GetLibrary(ctx context.Context, req *engine
 	return resp, nil
 }
 
+// distinctFilterValues collects the distinct, sorted values of a field
+// across the library, for populating the Genre/Artist/Album/etc. browse
+// columns on the hardware — those columns are driven entirely by
+// GetSearchFilters, not derived from the Playlists tree.
+func distinctFilterValues(tracks []*Track, get func(*Track) string) []*enginelibrary.SearchFilterValue {
+	seen := map[string]bool{}
+	for _, t := range tracks {
+		if v := get(t); v != "" {
+			seen[v] = true
+		}
+	}
+	values := make([]string, 0, len(seen))
+	for v := range seen {
+		values = append(values, v)
+	}
+	sort.Strings(values)
+	out := make([]*enginelibrary.SearchFilterValue, len(values))
+	for i, v := range values {
+		vv := v
+		out[i] = &enginelibrary.SearchFilterValue{Value: &vv}
+	}
+	return out
+}
+
 func (e *EngineLibraryServiceServer) GetSearchFilters(ctx context.Context, req *enginelibrary.GetSearchFiltersRequest) (*enginelibrary.GetSearchFiltersResponse, error) {
+	libraryMu.RLock()
+	defer libraryMu.RUnlock()
+
+	// The browse columns only offer values that actually occur among tracks
+	// matching whatever's currently in the search box — same "Clap your"
+	// text that filters the track list on the right narrows Genre/Artist/
+	// Album on the left too, not just the track list.
+	query := ""
+	if req.Query != nil {
+		query = strings.TrimSpace(*req.Query)
+	}
+	tracks := allTracks
+	if len(query) >= 2 {
+		tracks = nil
+		for _, t := range allTracks {
+			if trackMatchesQuery(t, query) {
+				tracks = append(tracks, t)
+			}
+		}
+	}
+
 	return &enginelibrary.GetSearchFiltersResponse{
-		SearchFilters: &enginelibrary.SearchFilterOptions{},
+		SearchFilters: &enginelibrary.SearchFilterOptions{
+			Genres:  distinctFilterValues(tracks, func(t *Track) string { return t.Genre }),
+			Artists: distinctFilterValues(tracks, func(t *Track) string { return t.Artist }),
+			Albums:  distinctFilterValues(tracks, func(t *Track) string { return t.Album }),
+		},
 	}, nil
 }
 
@@ -145,8 +195,64 @@ func (e *EngineLibraryServiceServer) GetTracks(ctx context.Context, req *enginel
 		return resp, nil
 	}
 
+	filters := req.GetFilters()
+	if len(filters) > 0 {
+		limit := int(req.GetPageSize())
+		if limit <= 0 {
+			limit = 25
+		}
+		for _, t := range allTracks {
+			if len(resp.Tracks) >= limit {
+				break
+			}
+			if !trackMatchesFilters(t, filters) {
+				continue
+			}
+			lt := &enginelibrary.ListTrack{Metadata: trackToMetadata(t)}
+			if len(t.Artwork) > 0 {
+				lt.PreviewArtwork = t.Artwork
+			}
+			resp.Tracks = append(resp.Tracks, lt)
+		}
+		return resp, nil
+	}
+
 	// Return empty for root collection view
 	return resp, nil
+}
+
+// trackMatchesFilters implements the browse-column drill-down (Genre then
+// Artist then Album, each narrowing the next): AND across different filter
+// fields, OR within one field's repeated values. BPM/Key filters have no
+// backing data in Track yet, so a filter on either field matches everything
+// rather than excluding every track.
+func trackMatchesFilters(t *Track, filters []*enginelibrary.SearchFilter) bool {
+	for _, f := range filters {
+		if !trackMatchesFilter(t, f) {
+			return false
+		}
+	}
+	return true
+}
+
+func trackMatchesFilter(t *Track, f *enginelibrary.SearchFilter) bool {
+	var field string
+	switch f.GetField() {
+	case enginelibrary.SearchFilterField_SEARCH_FILTER_FIELD_GENRE:
+		field = t.Genre
+	case enginelibrary.SearchFilterField_SEARCH_FILTER_FIELD_ARTIST:
+		field = t.Artist
+	case enginelibrary.SearchFilterField_SEARCH_FILTER_FIELD_ALBUM:
+		field = t.Album
+	default:
+		return true
+	}
+	for _, v := range f.GetValue() {
+		if strings.EqualFold(field, v) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *EngineLibraryServiceServer) PutEvents(ctx context.Context, req *enginelibrary.PutEventsRequest) (*enginelibrary.PutEventsResponse, error) {
@@ -179,6 +285,8 @@ func (e *EngineLibraryServiceServer) SearchTracks(ctx context.Context, req *engi
 		return resp, nil
 	}
 
+	filters := req.GetFilters()
+
 	// Respect page_size, default to 50 max
 	limit := int(req.GetPageSize())
 	if limit <= 0 || limit > 50 {
@@ -189,7 +297,7 @@ func (e *EngineLibraryServiceServer) SearchTracks(ctx context.Context, req *engi
 		if len(resp.Tracks) >= limit {
 			break
 		}
-		if !trackMatchesQuery(t, query) {
+		if !trackMatchesQuery(t, query) || !trackMatchesFilters(t, filters) {
 			continue
 		}
 		lt := &enginelibrary.ListTrack{Metadata: trackToMetadata(t)}
